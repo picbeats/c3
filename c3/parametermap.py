@@ -86,6 +86,9 @@ class ParameterMap:
         """
         with open(filepath, "r") as cfg_file:
             cfg = hjson.loads(cfg_file.read())
+        self.fromdict(cfg)
+
+    def fromdict(self, cfg: dict) -> None:
         for key, gate in cfg.items():
             if "mapto" in gate.keys():
                 instr = copy.deepcopy(self.instructions[gate["mapto"]])
@@ -242,7 +245,7 @@ class ParameterMap:
             values.append(par.get_opt_value())
         return np.array(values).flatten()
 
-    def set_parameters_scaled(self, values: tf.Variable) -> None:
+    def set_parameters_scaled(self, values: tf.constant) -> None:
         """
         Set the values in the original instruction class. This fuction should only be
         called by an optimizer. Are you an optimizer?
@@ -309,7 +312,7 @@ class ParameterMap:
                 ret.append("\n")
         return "".join(ret)
 
-    def print_parameters(self, opt_map = None) -> None:
+    def print_parameters(self, opt_map=None) -> None:
         """
         Print current parameters to stdout.
         """

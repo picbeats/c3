@@ -68,6 +68,9 @@ class Generator:
         """
         with open(filepath, "r") as cfg_file:
             cfg = hjson.loads(cfg_file.read())
+        self.fromdict(cfg)
+
+    def fromdict(self, cfg: dict) -> None:
         for name, props in cfg["Devices"].items():
             props["name"] = name
             dev_type = props.pop("c3type")
@@ -112,7 +115,7 @@ class Generator:
         """
         gen_signal = {}
         for chan in instr.comps:
-            signal_stack: List[tf.Variable] = []
+            signal_stack: List[tf.constant] = []
             for dev_id in self.chains[chan]:
                 dev = self.devices[dev_id]
                 inputs = []

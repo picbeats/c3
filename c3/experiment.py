@@ -23,6 +23,7 @@ from c3.signal.gates import Instruction
 from c3.system.model import Model
 from c3.utils import tf_utils
 
+
 class Experiment:
     """
     It models all of the behaviour of the physical experiment, serving as a
@@ -44,8 +45,8 @@ class Experiment:
     def __init__(self, pmap: ParameterMap = None):
         self.pmap = pmap
         self.opt_gates = None
-        self.unitaries = {}
-        self.dUs = {}
+        self.unitaries: dict = {}
+        self.dUs: dict = {}
         self.created_by = None
 
     def set_created_by(self, config):
@@ -120,6 +121,26 @@ class Experiment:
             instructions.append(instr)
 
         self.pmap = ParameterMap(instructions, generator=gen, model=model)
+
+    def read_config(self, filepath: str) -> None:
+        """
+        Load a file and parse it to create a Model object.
+
+        Parameters
+        ----------
+        filepath : str
+            Location of the configuration file
+
+        """
+        with open(filepath, "r") as cfg_file:
+            cfg = hjson.loads(cfg_file.read())
+        model = Model()
+        model.fromdict(cfg["model"])
+        generator = Generator()
+        generator.fromdict(cfg["generator"])
+        pmap = ParameterMap(model=model, generator=generator)
+        pmap.fromdict(cfg["instructions"])
+        self.pmap = pmap
 
     def write_config(self, filepath: str) -> None:
         """
@@ -260,15 +281,10 @@ class Experiment:
                 for line, ctrls in instr.comps.items():
                     # TODO calculate properly the average frequency that each qubit sees
                     offset = 0.0
-                    if "gauss" in ctrls:
-                        if ctrls["gauss"].params["amp"] != 0.0:
-                            offset = ctrls["gauss"].params["freq_offset"].get_value()
-                    if "flux" in ctrls:
-                        if ctrls["flux"].params["amp"] != 0.0:
-                            offset = ctrls["flux"].params["freq_offset"].get_value()
-                    if "pwc" in ctrls:
-                        offset = ctrls["pwc"].params["freq_offset"].get_value()
-                    # print("gate: ", gate, "; line: ", line, "; offset: ", offset)
+                    for ctrl in ctrls.values():
+                        if "freq_offset" in ctrl.params.keys():
+                            if ctrl.params["amp"] != 0.0:
+                                offset = ctrl.params["freq_offset"].get_value()
                     freqs[line] = tf.cast(
                         ctrls["carrier"].params["freq"].get_value() + offset,
                         tf.complex128,
@@ -277,7 +293,7 @@ class Experiment:
                         ctrls["carrier"].params["framechange"].get_value(),
                         tf.complex128,
                     )
-                t_final = tf.Variable(instr.t_end - instr.t_start, dtype=tf.complex128)
+                t_final = tf.constant(instr.t_end - instr.t_start, dtype=tf.complex128)
                 FR = model.get_Frame_Rotation(t_final, freqs, framechanges)
                 if model.lindbladian:
                     SFR = tf_utils.tf_super(FR)
@@ -294,7 +310,7 @@ class Experiment:
                     for line, ctrls in instr.comps.items():
                         amp, sum = generator.devices["awg"].get_average_amp()
                         amps[line] = tf.cast(amp, tf.complex128)
-                    t_final = tf.Variable(
+                    t_final = tf.constant(
                         instr.t_end - instr.t_start, dtype=tf.complex128
                     )
                     dephasing_channel = model.get_dephasing_channel(t_final, amps)
@@ -330,7 +346,7 @@ class Experiment:
             signals.append(signal[key]["values"])
             ts = signal[key]["ts"]
             hks.append(hctrls[key])
-        dt = tf.Variable(ts[1].numpy() - ts[0].numpy(), dtype=tf.complex128)
+        dt = tf.constant(ts[1].numpy() - ts[0].numpy(), dtype=tf.complex128)
 
         if model.lindbladian:
             col_ops = model.get_Lindbladians()
@@ -382,7 +398,6 @@ class Experiment:
             os.makedirs(self.logdir + "unitaries/", exist_ok=exist_ok)
             self.store_unitaries_counter = 0
 
-
     def store_Udict(self, goal):
         """
         Save unitary as text and pickle.
@@ -407,7 +422,7 @@ class Experiment:
             pickle.dump(self.unitaries, file)
         for key, value in self.unitaries.items():
             # Windows is not able to parse ":" as file path
-            np.savetxt(folder + key.replace(':','.') + ".txt", value)
+            np.savetxt(folder + key.replace(":", ".") + ".txt", value)
 
     def populations(self, state, lindbladian):
         """
@@ -430,12 +445,12 @@ class Experiment:
             pops = tf.math.real(tf.linalg.diag_part(rho))
             return tf.reshape(pops, shape=[pops.shape[0], 1])
         else:
-            return tf.abs(state)**2
+            return tf.abs(state) ** 2
 
     def expect_oper(self, state, lindbladian, oper):
         if lindbladian:
             rho = tf_utils.tf_vec_to_dm(state)
         else:
             rho = tf_utils.tf_state_to_dm(state)
-        trace = np.trace(np.matmul(rho,oper))
-        return [[np.real(trace)]] #,[np.imag(trace)]]
+        trace = np.trace(np.matmul(rho, oper))
+        return [[np.real(trace)]]  # ,[np.imag(trace)]]
