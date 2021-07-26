@@ -1,0 +1,21 @@
+name: c3-jurek
+image: mcr.microsoft.com/vscode/devcontainers/python:3.8
+command: bash
+volumes:
+- /root/.cache/pip
+sync:
+- .:/usr/src/app
+persistentVolume:
+  size: 20Gi
+# forward:
+# - 8080:8080
+# reverse:
+# - 9000:9000
+# resources:
+#   requests:
+#     cpu: "128"
+#     memory: "512Gi"
+#   limits:
+#     cpu: "256"
+#     memory: "1024Gi"
+autocreate: true

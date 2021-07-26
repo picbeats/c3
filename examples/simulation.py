@@ -1,149 +1,17 @@
+
 # System imports
+from c3.signal.gates import Instruction
 import copy
 import numpy as np
 import time
 import itertools
-import matplotlib
-import matplotlib.pyplot as plt
-import tensorflow as tf
-import tensorflow_probability as tfp
-import seaborn as sns
+# import matplotlib
+# import matplotlib.pyplot as plt
+
+import pprint
+
 import multiprocessing
-
-# Main C3 objects
-from c3.c3objs import Quantity as Qty
-from c3.parametermap import ParameterMap as PMap
-from c3.experiment import Experiment as Exp
-from c3.model import Model as Mdl
-from c3.generator.generator import Generator as Gnr
-
-# Building blocks
-import c3.generator.devices as devices
-from c3.generator.devices import Device
-import c3.signal.gates as gates
-from c3.signal.gates import Instruction
-import c3.libraries.chip as chip
-import c3.signal.pulse as pulse
-import c3.libraries.tasks as tasks
-
-# Libs and helpers
-import c3.libraries.algorithms as algorithms
-import c3.libraries.hamiltonians as hamiltonians
-import c3.libraries.fidelities as fidelities
-import c3.libraries.envelopes as envelopes
-import c3.utils.qt_utils as qt_utils
-import c3.utils.tf_utils as tf_utils
-import c3.utils.noise_utils as ns_utils
-
-###ssh forwarding
-matplotlib.use("tkagg")  # Or any other X11 back-end
-###user defs
-class ChargeBias(Device):
-    def __init__(self, omega, amplitude, **props):
-        super().__init__(**props)
-        self.inputs = props.pop("inputs", 0)
-        self.outputs = props.pop("outputs", 1)
-        self.omega = omega
-        self.amplitude = amplitude
-
-    def process(self, instr: Instruction, chan: str):
-        # charge_noise=ns_utils.load_spectrum("data/data_charge.dat")
-        # charge_noise[:,0]=2*np.pi*charge_noise[:,0]
-        # N=500#int(max(charge_noise[:,0])/min(charge_noise[:,0]))
-        # freqs, times, ngs = ns_utils.generate_time_shot(charge_noise,N)
-        # print("times:" , times)
-        # 27337017192.233242#
-        times = np.linspace(0, 400e-9, 200)
-        ngs = self.amplitude * np.cos(self.omega * times)
-        signal = {
-            "NG": ngs,
-            "ts": times,
-        }
-        return signal
-
-
-###propagtion because the one c3 does not work
-def tf_propagation_vectorized(h0, hks, cflds_t, dt):
-    dt = tf.cast(dt, dtype=tf.complex128)
-    if hks is not None and cflds_t is not None:
-        cflds_t = tf.cast(cflds_t, dtype=tf.complex128)
-        hks = tf.cast(hks, dtype=tf.complex128)
-        cflds = tf.expand_dims(tf.expand_dims(cflds_t, 2), 3)
-        hks = tf.expand_dims(hks, 1)
-        if len(h0.shape) < 3:
-            h0 = tf.expand_dims(h0, 0)
-        prod = cflds * hks
-        h = h0 + tf.reduce_sum(prod, axis=0)
-    else:
-        h = tf.cast(h0, tf.complex128)
-    dUs = []
-    delta = dt[1]
-    for i in range(len(dt)):
-        dh = -1.0j * h[i] * delta
-        dU = tf.linalg.expm(dh)
-        dUs.append(dU)
-    return dUs
-
-    def plot_dynamics(exp, psi_init, seq, goal=-1, dUs=None, dt=None, w=None):
-        """
-        Plotting code for time-resolved populations.
-
-        Parameters
-        ----------
-        psi_init: tf.Tensor
-            Initial state or density matrix.
-        seq: list
-            List of operations to apply to the initial state.
-        goal: tf.float64
-            Value of the goal function, if used.
-        debug: boolean
-            If true, return a matplotlib figure instead of saving.
-        """
-        model = exp.pmap.model
-        model.use_FR = False
-        model.lindbladian = False
-        ###does not work dUs = exp.compute_propagators() #partial_propagators
-        psi_t = psi_init.numpy()
-        pop_t = exp.populations(psi_t, model.lindbladian)
-        # tf.reshape(pop_t, (21,))
-        for du in dUs:
-            psi_t = np.matmul(du.numpy(), psi_t)
-            pops = exp.populations(psi_t, model.lindbladian)
-            pop_t = np.append(pop_t, pops, axis=1)
-        fig, axs = plt.subplots(1, 1)
-        ts = dt
-        dt = ts[1] - ts[0]
-        ts = np.linspace(0.0, dt * pop_t.shape[1], pop_t.shape[1])
-        # axs.plot(ts / 1e-9, pop_t.T)
-        axs.plot(ts / 1e-9, pop_t.T[:, 0])
-        axs.plot(ts / 1e-9, pop_t.T[:, 1])
-        # return pop_t.T[:,0]
-
-        axs.plot(ts / 1e-9, pop_t.T[:, 2])
-        axs.grid(linestyle="--")
-        axs.tick_params(direction="in", left=True, right=True, top=True, bottom=True)
-        axs.set_xlabel("Time [ns]")
-        axs.set_ylabel("Population")
-        plt.legend(model.state_labels)
-        plt.show()
-        # plt.savefig('test.pdf')
-
-
-def collect_resonance(exp, psi_init, seq, goal=-1, dUs=None, dt=None):
-    model = exp.pmap.model
-    model.use_FR = False
-    model.lindbladian = False
-    psi_t = psi_init.numpy()
-    pop_t = exp.populations(psi_t, model.lindbladian)
-    for du in dUs:
-        psi_t = np.matmul(du.numpy(), psi_t)
-        pops = exp.populations(psi_t, model.lindbladian)
-        pop_t = np.append(pop_t, pops, axis=1)
-    ts = dt
-    dt = ts[1] - ts[0]
-    ts = np.linspace(0.0, dt * pop_t.shape[1], pop_t.shape[1])
-    return pop_t.T[:, 1]  # ,pop_t.T[-1,1]
-
+from functools import partial
 
 ############### Creating qubit ###################
 qubit_lvls = 21
@@ -154,102 +22,271 @@ q1_ng = 0
 q1_asym = 0
 q1_redflux = 0
 
-q1 = chip.CooperPairBox(
-    name="Q1",
-    desc="Qubit 1",
-    EC=Qty(value=q1_ec, min_val=200e6, max_val=400e6, unit="Hz 2pi"),
-    EJ=Qty(value=q1_ej, min_val=1e9, max_val=30e9, unit="Hz 2pi"),
-    hilbert_dim=qubit_lvls,
-    NG=Qty(value=q1_ng, min_val=-1, max_val=1, unit=""),
-    Asym=Qty(value=q1_asym, min_val=-1, max_val=1, unit=""),
-    Reduced_Flux=Qty(value=q1_redflux, min_val=-1, max_val=1, unit=""),
-)
+def calc_population(values):
 
-############ Generate Model ###################
-model = Mdl([q1], [], [])
-model.use_FR = False
-model.lindbladian = False
-############# For plot dynamics ################
-# signal=generator.generate_signals(Instruction(channels=["Q1"]))
-# HCB=q1.get_Hamiltonian(signal=signal["Q1"])
-# Hs=[]
-# H_0=q1.get_Hamiltonian()
-# e,v=tf.linalg.eigh(H_0)
-# print(e[1]-e[0])
+    import tensorflow as tf
+    import tensorflow_probability as tfp
+    import seaborn as sns
 
-# for h in HCB:
-#    tmp=tf.linalg.inv(v)@h@v
-#    Hs.append(tmp)
-# dt=signal["Q1"]["ts"]
-# dUs=tf_propagation_vectorized(Hs, hks=None, cflds_t=None, dt=dt)
-############# generate instructions (here do nothing) ####
-t_final = 3e-9
-nodrive_env = pulse.Envelope(
-    name="no_drive",
-    params={
-        "t_final": Qty(
-            value=t_final, min_val=0.5 * t_final, max_val=1.5 * t_final, unit="s"
-        )
-    },
-    shape=envelopes.no_drive,
-)
+    # Main C3 objects
+    from c3.c3objs import Quantity as Qty
+    from c3.parametermap import ParameterMap as PMap
+    from c3.experiment import Experiment as Exp
+    from c3.model import Model as Mdl
+    from c3.generator.generator import Generator as Gnr
 
-########### adding instructions #################
-identity_q1 = gates.Instruction(
-    name="identity", targets=[0], t_start=0.0, t_end=t_final, channels=["Q1"]
-)
-identity_q1.add_component(nodrive_env, "Q1")
-single_q_gates = [identity_q1]
+    # Building blocks
+    import c3.generator.devices as devices
+    from c3.generator.devices import Device
+    import c3.signal.gates as gates
+    from c3.signal.gates import Instruction
+    import c3.libraries.chip as chip
+    import c3.signal.pulse as pulse
+    import c3.libraries.tasks as tasks
+
+    # Libs and helpers
+    import c3.libraries.algorithms as algorithms
+    import c3.libraries.hamiltonians as hamiltonians
+    import c3.libraries.fidelities as fidelities
+    import c3.libraries.envelopes as envelopes
+    import c3.utils.qt_utils as qt_utils
+    import c3.utils.tf_utils as tf_utils
+    import c3.utils.noise_utils as ns_utils
 
 
-##Dynamics
-psi_init = [[0] * 21]  ###thermal states als initials
-psi_init[0][0] = 1
-psi_init[0][1] = 0
-init_state = tf.transpose(tf.constant(psi_init, tf.complex128))
-# init_state = v @ init_state
-barely_a_seq = ["identity"]
+    ###ssh forwarding
+    # matplotlib.use("tkagg")  # Or any other X11 back-end
+    ###user defs
+    class ChargeBias(Device):
+        def __init__(self, omega, amplitude, **props):
+            super().__init__(**props)
+            self.inputs = props.pop("inputs", 0)
+            self.outputs = props.pop("outputs", 1)
+            self.omega = omega
+            self.amplitude = amplitude
 
-# plot_dynamics(exp, init_state, barely_a_seq, dUs=dUs, dt=dt)
-omega = np.linspace(
-    41847055724.892105 - 2 * np.pi * 50e6, 41847055724.892105 + 2 * np.pi * 50e6, 100
-)
-amplitude = np.linspace(0, 0.1, 100)
-H_0 = q1.get_Hamiltonian()
-e, v = tf.linalg.eigh(H_0)
+        def process(self, instr: Instruction, chan: str):
+            # charge_noise=ns_utils.load_spectrum("data/data_charge.dat")
+            # charge_noise[:,0]=2*np.pi*charge_noise[:,0]
+            # N=500#int(max(charge_noise[:,0])/min(charge_noise[:,0]))
+            # freqs, times, ngs = ns_utils.generate_time_shot(charge_noise,N)
+            # print("times:" , times)
+            # 27337017192.233242#
+            times = np.linspace(0, 400e-9, 200)
+            ngs = self.amplitude * np.cos(self.omega * times)
+            signal = {
+                "NG": ngs,
+                "ts": times,
+            }
+            return signal
 
 
-def calc_population(k):
-    i = k % 10
-    j = int(k / 10)
-    w = omega[j]
-    a = amplitude[i]
-    generator = Gnr(
-        devices={"ChargeBias": ChargeBias(w, a, name="ChargeBias")},
-        chains={"Q1": ["ChargeBias"]},
+    ###propagtion because the one c3 does not work
+    def tf_propagation_vectorized(h0, hks, cflds_t, dt):
+        dt = tf.cast(dt, dtype=tf.complex128)
+        if hks is not None and cflds_t is not None:
+            cflds_t = tf.cast(cflds_t, dtype=tf.complex128)
+            hks = tf.cast(hks, dtype=tf.complex128)
+            cflds = tf.expand_dims(tf.expand_dims(cflds_t, 2), 3)
+            hks = tf.expand_dims(hks, 1)
+            if len(h0.shape) < 3:
+                h0 = tf.expand_dims(h0, 0)
+            prod = cflds * hks
+            h = h0 + tf.reduce_sum(prod, axis=0)
+        else:
+            h = tf.cast(h0, tf.complex128)
+        dUs = []
+        delta = dt[1]
+        for i in range(len(dt)):
+            dh = -1.0j * h[i] * delta
+            dU = tf.linalg.expm(dh)
+            dUs.append(dU)
+        return dUs
+
+    # def plot_dynamics(exp, psi_init, seq, goal=-1, dUs=None, dt=None, w=None):
+    #     """
+    #     Plotting code for time-resolved populations.
+
+    #     Parameters
+    #     ----------
+    #     psi_init: tf.Tensor
+    #         Initial state or density matrix.
+    #     seq: list
+    #         List of operations to apply to the initial state.
+    #     goal: tf.float64
+    #         Value of the goal function, if used.
+    #     debug: boolean
+    #         If true, return a matplotlib figure instead of saving.
+    #     """
+    #     model = exp.pmap.model
+    #     model.use_FR = False
+    #     model.lindbladian = False
+    #     ###does not work dUs = exp.compute_propagators() #partial_propagators
+    #     psi_t = psi_init.numpy()
+    #     pop_t = exp.populations(psi_t, model.lindbladian)
+    #     # tf.reshape(pop_t, (21,))
+    #     for du in dUs:
+    #         psi_t = np.matmul(du.numpy(), psi_t)
+    #         pops = exp.populations(psi_t, model.lindbladian)
+    #         pop_t = np.append(pop_t, pops, axis=1)
+    #     fig, axs = plt.subplots(1, 1)
+    #     ts = dt
+    #     dt = ts[1] - ts[0]
+    #     ts = np.linspace(0.0, dt * pop_t.shape[1], pop_t.shape[1])
+    #     # axs.plot(ts / 1e-9, pop_t.T)
+    #     axs.plot(ts / 1e-9, pop_t.T[:, 0])
+    #     axs.plot(ts / 1e-9, pop_t.T[:, 1])
+    #     # return pop_t.T[:,0]
+
+    #     axs.plot(ts / 1e-9, pop_t.T[:, 2])
+    #     axs.grid(linestyle="--")
+    #     axs.tick_params(direction="in", left=True, right=True, top=True, bottom=True)
+    #     axs.set_xlabel("Time [ns]")
+    #     axs.set_ylabel("Population")
+    #     plt.legend(model.state_labels)
+    #     plt.show()
+    #     # plt.savefig('test.pdf')
+
+
+    def collect_resonance(exp, psi_init, seq, goal=-1, dUs=None, dt=None):
+        model = exp.pmap.model
+        model.use_FR = False
+        model.lindbladian = False
+        psi_t = psi_init.numpy()
+        pop_t = exp.populations(psi_t, model.lindbladian)
+        for du in dUs:
+            psi_t = np.matmul(du.numpy(), psi_t)
+            pops = exp.populations(psi_t, model.lindbladian)
+            pop_t = np.append(pop_t, pops, axis=1)
+        ts = dt
+        dt = ts[1] - ts[0]
+        ts = np.linspace(0.0, dt * pop_t.shape[1], pop_t.shape[1])
+        return pop_t.T[:, 1]  # ,pop_t.T[-1,1]
+
+    q1 = chip.CooperPairBox(
+        name="Q1",
+        desc="Qubit 1",
+        EC=Qty(value=q1_ec, min_val=200e6, max_val=400e6, unit="Hz 2pi"),
+        EJ=Qty(value=q1_ej, min_val=1e9, max_val=30e9, unit="Hz 2pi"),
+        hilbert_dim=qubit_lvls,
+        NG=Qty(value=q1_ng, min_val=-1, max_val=1, unit=""),
+        Asym=Qty(value=q1_asym, min_val=-1, max_val=1, unit=""),
+        Reduced_Flux=Qty(value=q1_redflux, min_val=-1, max_val=1, unit=""),
     )
-    parameter_map = PMap(instructions=single_q_gates, model=model, generator=generator)
-    # exp = Exp(pmap=parameter_map)
-    # exp.use_control_fields=False
-    signal = generator.generate_signals(Instruction(channels=["Q1"]))
-    HCB = q1.get_Hamiltonian(signal=signal["Q1"])
-    Hs = []
-    for h in HCB:
-        tmp = tf.linalg.inv(v) @ h @ v
-        Hs.append(tmp)
-    dt = signal["Q1"]["ts"]
-    dUs = tf_propagation_vectorized(Hs, hks=None, cflds_t=None, dt=dt)
-    return collect_resonance(exp, init_state, barely_a_seq, dUs=dUs, dt=dt)
+
+    ############ Generate Model ###################
+    model = Mdl([q1], [], [])
+    model.use_FR = False
+    model.lindbladian = False
+    ############# For plot dynamics ################
+    # signal=generator.generate_signals(Instruction(channels=["Q1"]))
+    # HCB=q1.get_Hamiltonian(signal=signal["Q1"])
+    # Hs=[]
+    # H_0=q1.get_Hamiltonian()
+    # e,v=tf.linalg.eigh(H_0)
+    # print(e[1]-e[0])
+
+    # for h in HCB:
+    #    tmp=tf.linalg.inv(v)@h@v
+    #    Hs.append(tmp)
+    # dt=signal["Q1"]["ts"]
+    # dUs=tf_propagation_vectorized(Hs, hks=None, cflds_t=None, dt=dt)
+    ############# generate instructions (here do nothing) ####
+    t_final = 3e-9
+    nodrive_env = pulse.Envelope(
+        name="no_drive",
+        params={
+            "t_final": Qty(
+                value=t_final, min_val=0.5 * t_final, max_val=1.5 * t_final, unit="s"
+            )
+        },
+        shape=envelopes.no_drive,
+    )
+
+    ########### adding instructions #################
+    identity_q1 = gates.Instruction(
+        name="identity", targets=[0], t_start=0.0, t_end=t_final, channels=["Q1"]
+    )
+    identity_q1.add_component(nodrive_env, "Q1")
+    single_q_gates = [identity_q1]
 
 
-pool = multiprocessing.Pool(8)
-data = zip(*pool.map(calc_population, range(100)))
-data = np.array(data)
+    ##Dynamics
+    psi_init = [[0] * 21]  ###thermal states als initials
+    psi_init[0][0] = 1
+    psi_init[0][1] = 0
+    init_state = tf.transpose(tf.constant(psi_init, tf.complex128))
+    # init_state = v @ init_state
+    barely_a_seq = ["identity"]
+
+    # plot_dynamics(exp, init_state, barely_a_seq, dUs=dUs, dt=dt)
+    omega = np.linspace(
+        41847055724.892105 - 2 * np.pi * 50e6, 41847055724.892105 + 2 * np.pi * 50e6, 100
+    )
+    amplitude = np.linspace(0, 0.1, 100)
+    H_0 = q1.get_Hamiltonian()
+    e, v = tf.linalg.eigh(H_0)
+
+    pprint.pprint(values)
+    print("Start-iteration")
+
+    def calculate(k):
+        i = k % 100
+        j = int(k / 100)
+        w = omega[j]
+        a = amplitude[i]
+        generator = Gnr(
+            devices={"ChargeBias": ChargeBias(w, a, name="ChargeBias")},
+            chains={"Q1": ["ChargeBias"]},
+        )
+        parameter_map = PMap(instructions=single_q_gates, model=model, generator=generator)
+        exp = Exp(pmap=parameter_map)
+        exp.use_control_fields=False
+        signal = generator.generate_signals(Instruction(channels=["Q1"]))
+        HCB = q1.get_Hamiltonian(signal=signal["Q1"])
+        Hs = []
+        for h in HCB:
+            tmp = tf.linalg.inv(v) @ h @ v
+            Hs.append(tmp)
+        dt = signal["Q1"]["ts"]
+        dUs = tf_propagation_vectorized(Hs, hks=None, cflds_t=None, dt=dt)
+        result = collect_resonance(exp, init_state, barely_a_seq, dUs=dUs, dt=dt)
+        # result = np.int(i)
+        # pprint.pprint(result)
+        # print("End-iteration")
+        return (k, result)
+
+    # Sequentially execute calculation for each index in a chunk
+    return list(map(calculate, values))
+
+def ceildiv(a, b):
+    return -(-a // b)
+
+def chunk(lst, n):
+    """Yield successive n-sized chunks from lst."""
+    for i in range(0, len(lst), n):
+        yield lst[i:i + n]
+
+import itertools
+
+print("Start parallel")
+parallelity = 128
+size = 10000
+pool = multiprocessing.Pool(parallelity)
+chunks = list(chunk(list(range(size)), ceildiv(size, parallelity)))
+pprint.pprint(chunks)
+pairs=sorted(itertools.chain.from_iterable(pool.map(calc_population, chunks)))
+data = np.array([item[1] for item in pairs])
+pprint.pprint(data)
+# data = list(calc_population(range(1)))
+# pprint.pprint(data)
+print("End parallel")
 np.savetxt(
     "chevron_parallel=" + str(q1_ec) + "_ej=" + str(q1_ej) + "_pop1.csv",
     data,
     delimiter=",",
 )
+print("Text saved")
 
 ############
 ##SPAM
