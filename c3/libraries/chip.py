@@ -302,7 +302,7 @@ class Transmon(PhysicalComponent):
     """
 
     def __init__(
-        self,
+            self,
         name: str,
         desc: str = None,
         comment: str = None,
@@ -914,6 +914,118 @@ class CShuntFluxQubit(Qubit):
     #         "frequency": frequency,
     #         "anharmonicity": anharmonicity,
     #     }  # , "#third order": third_order}
+
+
+#@dev_reg_deco
+#@tf.function
+class CooperPairBox(PhysicalComponent):
+    def __init__(
+        self,
+        name: str,
+        desc: str = None,
+        comment: str = None,
+        hilbert_dim: int = None,
+        calc_dim: int = None,
+        EC: Quantity = None,
+        EJ: Quantity = None,
+        NG: Quantity = None,
+        Asym: Quantity = None,
+        Reduced_Flux: Quantity = None,
+        params=None,
+    ):
+        super().__init__(
+            name=name,
+            desc=desc,
+            comment=comment,
+            hilbert_dim=hilbert_dim,
+            params=params,
+        )
+        if not self.hilbert_dim % 2:
+            raise Exception("Hilbert dimension has to be odd.")
+        if EC:
+            self.params["EC"] = EC
+        if EJ:
+            self.params["EJ"] = EJ
+        if Asym:
+            self.params["Asym"] = Asym
+        if Reduced_Flux:
+            self.params["Reduced_Flux"] = Reduced_Flux
+        if NG:
+            self.params["NG"] = NG
+
+    def init_Hs(self, ann_oper):
+        a=0  
+
+    def init_Ls(self, ann_oper):
+        a=0
+
+    def get_Hamiltonian(self,signal=None,transform=None):
+        ec = tf.cast(self.params["EC"].get_value(), tf.complex128)
+        ej = tf.cast(self.params["EJ"].get_value(), tf.complex128)
+        asym = tf.cast(self.params["Asym"].get_value(), tf.complex128)
+        reduced_flux = tf.cast(self.params["Reduced_Flux"].get_value(), tf.complex128)
+        if signal:
+            h_of_t = []#tf.zeros([self.hilbert_dim, self.hilbert_dim])
+            ng_of_t = signal["NG"]#.get_value()
+            for ng in ng_of_t:
+                ng_mat = np.eye(self.hilbert_dim, k=+1) + np.eye(self.hilbert_dim, k=-1)
+                EJphi = ej * tf.sqrt(
+                    asym ** 2 + (1 - asym ** 2) * tf.math.cos(np.pi * reduced_flux) ** 2
+                )
+                diag_mat=tf.cast(np.arange(
+                            -(self.hilbert_dim - 1) / 2 - ng,
+                            (self.hilbert_dim - 1) / 2 - ng + 1,
+                            )
+                            ** 2,
+                            tf.complex128
+                            )
+                h = (
+                    4 * ec * tf.linalg.diag(diag_mat)
+                    - EJphi / 2 * tf.constant(ng_mat, dtype=tf.complex128)
+                )
+                h_of_t.append(h)
+            return h_of_t
+        else:
+            ng_mat = np.eye(self.hilbert_dim, k=+1) + np.eye(self.hilbert_dim, k=-1)
+            ng = tf.cast(self.params["NG"].get_value(), tf.complex128)
+            EJphi = ej * tf.sqrt(
+                asym ** 2 + (1 - asym ** 2) * tf.math.cos(np.pi * reduced_flux) ** 2
+            )
+            h = 4 * ec * tf.linalg.diag(
+                np.arange(
+                    -(self.hilbert_dim - 1) / 2 - ng, (self.hilbert_dim - 1) / 2 - ng + 1
+                )
+                ** 2
+            ) - EJphi / 2 * tf.constant(ng_mat, dtype=tf.complex128)
+            return h
+
+    def get_Hamiltonian_of_t(self, signal):
+        ec = tf.cast(self.params["EC"].get_value(), tf.complex128)
+        ej = tf.cast(self.params["EJ"].get_value(), tf.complex128)
+        asym = tf.cast(self.params["Asym"].get_value(), tf.complex128)
+        reduced_flux = tf.cast(self.params["Reduced_Flux"].get_value(), tf.complex128)
+        h_of_t = []
+        if signal:
+            ng_of_t = np.array(signal["NG"]).flatten()
+            for ng in ng_of_t:
+                print(ng)
+                ng_mat = np.eye(self.hilbert_dim, k=+1) + np.eye(self.hilbert_dim, k=-1)
+                EJphi = ej * tf.sqrt(
+                    asym ** 2 + (1 - asym ** 2) * tf.math.cos(np.pi * reduced_flux) ** 2
+                )
+                diag_mat=tf.cast(np.arange(
+                            -(self.hilbert_dim - 1) / 2 - ng,
+                            (self.hilbert_dim - 1) / 2 - ng + 1,
+                            )
+                            ** 2
+                        , tf.complex128)
+                h = (
+                    4 * ec * tf.linalg.diag(diag_mat)
+                    - EJphi / 2 * tf.constant(ng_mat, dtype=tf.complex128)
+                )
+                print("shape is in ham:" ,h.shape)
+                h_of_t.append(h)
+        return h_of_t
 
 
 @dev_reg_deco

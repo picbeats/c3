@@ -272,7 +272,7 @@ class Model:
         else:
             return self.drift_ham, self.control_hams
 
-    @tf.function
+    # @tf.function
     def get_Hamiltonian(self, signal=None):
         """Get a hamiltonian with an optional signal. This will return an hamiltonian over time.
         Can be used e.g. for tuning the frequency of a transmon, where the control hamiltonian is not easily accessible"""

@@ -257,7 +257,9 @@ def tf_batch_propagate(hamiltonian, hks, signals, dt, batch_size):
             result = tf_propagation_vectorized(hamiltonian, hks, x, dt)
         else:
             result = tf_propagation_vectorized(x, None, None, dt)
+        print("in utils:", result.shape)
         dUs_array = dUs_array.write(i, result)
+        tf.Print(dUs_array)
     return dUs_array.concat()
 
 
